@@ -82,10 +82,10 @@ jobs:
 
 ### Outputs
 
-| Output    | Description                                                                                                                             |
-| --------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `outcome` | JSON object mapping each upstream to its outcome (`up-to-date`, `fast-forwarded`, `clean`, `resolved`, `partial`, `broken`, `skip`, …). |
-| `pr-urls` | Newline-separated URLs of PRs created or updated.                                                                                       |
+| Output    | Description                                                                                                                                                                                                       |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `outcome` | JSON object mapping each upstream to its outcome: `up-to-date`, `fast-forwarded`, `issue-notified`, `clean`, `resolved`, `partial`, `broken`, `skip`, `empty`, `skipped-human-commits`, or `declined-previously`. |
+| `pr-urls` | Newline-separated URLs of PRs created or updated.                                                                                                                                                                 |
 
 ## Configuration
 
@@ -98,13 +98,16 @@ upstreams:
     parent: true
   - repo: desirecore/electron-vite # any other repo that shares history
     branch: main # optional, defaults to their default branch
+    # url: https://example.com/mirror.git — optional explicit git URL
+    #   (for upstreams not at github.com/<repo>.git)
 
 # auto (default): fast-forward directly when your fork has no unique commits.
 # issue: open a notification issue instead and leave the syncing to you.
 ff: auto
 
 # Run before and after each sync. The pre-sync baseline tells the agent
-# whether a failure is pre-existing or something the sync broke.
+# whether a failure is pre-existing or something the sync broke. Killed
+# after 30 minutes (override with an FT_VERIFY_TIMEOUT env var, seconds).
 verify: pnpm install && pnpm build && pnpm test
 
 # Paths always kept at your fork's version, extending the built-in list
