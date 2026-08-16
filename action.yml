@@ -1,0 +1,135 @@
+name: Fork Tender
+description: >-
+  Keep your forks aligned with upstream: detects new upstream commits,
+  fast-forwards when safe, and uses Claude to evaluate and merge changes —
+  always preserving your fork's local modifications — via reviewable PRs.
+author: Eric Mika
+branding:
+  icon: git-merge
+  color: green
+
+inputs:
+  anthropic-api-key:
+    description: Anthropic API key (either this or claude-code-oauth-token is required)
+    required: false
+  claude-code-oauth-token:
+    description: Claude subscription OAuth token from `claude setup-token` (either this or anthropic-api-key is required)
+    required: false
+  github-token:
+    description: >-
+      GitHub token for pushes, PRs, and issues. When omitted, the Claude GitHub
+      App's short-lived token is used where available (requires `id-token:
+      write` and the Claude GitHub App installed), falling back to the
+      workflow's GITHUB_TOKEN — note GITHUB_TOKEN-pushed commits do not trigger
+      CI on the sync PRs.
+    required: false
+  model:
+    description: Claude model to use
+    required: false
+    default: claude-opus-5
+  config-path:
+    description: Path to the fork-tender config file in this repository
+    required: false
+    default: .github/fork-tender.yml
+  extra-allowed-tools:
+    description: >-
+      Comma-separated additional Claude tool permissions, e.g.
+      "Bash(pnpm:*),Bash(npm:*)" — grant whatever your configured verify
+      command needs to run.
+    required: false
+    default: ''
+  max-turns:
+    description: Maximum agent turns for the Claude phase
+    required: false
+    default: '100'
+  allowed-bots:
+    description: Passed through to claude-code-action; needed when a bot account last edited the workflow cron
+    required: false
+    default: ''
+  dry-run:
+    description: Detect and attempt merges locally, but never push, open PRs, or invoke Claude
+    required: false
+    default: 'false'
+
+outputs:
+  outcome:
+    description: JSON object mapping each upstream repo to its outcome
+    value: ${{ steps.publish.outputs.outcome }}
+  pr-urls:
+    description: Newline-separated URLs of PRs created or updated
+    value: ${{ steps.publish.outputs.pr-urls }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate inputs
+      shell: bash
+      env:
+        HAS_AUTH: ${{ (inputs.anthropic-api-key != '' || inputs.claude-code-oauth-token != '') && 'true' || 'false' }}
+        DRY_RUN: ${{ inputs.dry-run }}
+      run: |
+        if [[ "$HAS_AUTH" != 'true' && "$DRY_RUN" != 'true' ]]; then
+          echo '::error::fork-tender needs anthropic-api-key or claude-code-oauth-token'
+          exit 1
+        fi
+
+    - name: Detect upstream changes
+      id: detect
+      shell: bash
+      env:
+        FT_CONFIG_PATH: ${{ inputs.config-path }}
+        FT_DRY_RUN: ${{ inputs.dry-run }}
+        GH_TOKEN: ${{ inputs.github-token || github.token }}
+      run: '"${GITHUB_ACTION_PATH}/scripts/detect.sh"'
+
+    - name: Restore rerere cache
+      if: steps.detect.outputs.needs_sync == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: .git/rr-cache
+        key: fork-tender-rerere-${{ github.run_id }}
+        restore-keys: |
+          fork-tender-rerere-
+
+    - name: Fast-forward
+      if: steps.detect.outputs.needs_ff == 'true'
+      shell: bash
+      env:
+        FT_DRY_RUN: ${{ inputs.dry-run }}
+        GH_TOKEN: ${{ inputs.github-token || github.token }}
+      run: '"${GITHUB_ACTION_PATH}/scripts/ff.sh"'
+
+    - name: Prepare sync branches
+      id: prepare
+      if: steps.detect.outputs.needs_sync == 'true'
+      shell: bash
+      env:
+        FT_DRY_RUN: ${{ inputs.dry-run }}
+        GH_TOKEN: ${{ inputs.github-token || github.token }}
+      run: '"${GITHUB_ACTION_PATH}/scripts/prepare.sh"'
+
+    - name: Resolve and evaluate with Claude
+      id: claude
+      if: steps.prepare.outputs.claude_needed == 'true' && inputs.dry-run != 'true'
+      uses: anthropics/claude-code-action@9d7150bc8a3dae8149739a88019d192b579ad90c # v1.0.193
+      with:
+        anthropic_api_key: ${{ inputs.anthropic-api-key }}
+        claude_code_oauth_token: ${{ inputs.claude-code-oauth-token }}
+        github_token: ${{ inputs.github-token }}
+        allowed_bots: ${{ inputs.allowed-bots }}
+        prompt: ${{ steps.prepare.outputs.prompt }}
+        claude_args: >-
+          --model ${{ inputs.model }}
+          --max-turns ${{ inputs.max-turns }}
+          --add-dir ${{ runner.temp }}/fork-tender
+          --allowedTools "Read,Edit,Write,Grep,Glob,Bash(git status:*),Bash(git stash:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git add:*),Bash(git rm:*),Bash(git checkout:*),Bash(git switch:*),Bash(git restore:*),Bash(git merge:*),Bash(git rebase:*),Bash(git cherry-pick:*),Bash(git revert:*),Bash(git commit:*),Bash(git branch:*),Bash(git rev-parse:*),Bash(git rev-list:*),Bash(git merge-base:*),Bash(git ls-files:*),Bash(git describe:*),Bash(git rerere:*),Bash(git grep:*)${{ inputs.extra-allowed-tools != '' && format(',{0}', inputs.extra-allowed-tools) || '' }}"
+
+    - name: Publish PRs
+      id: publish
+      if: steps.detect.outputs.has_work == 'true'
+      shell: bash
+      env:
+        FT_DRY_RUN: ${{ inputs.dry-run }}
+        FT_PUSH_TOKEN: ${{ inputs.github-token || steps.claude.outputs.github_token || github.token }}
+        GH_TOKEN: ${{ inputs.github-token || steps.claude.outputs.github_token || github.token }}
+      run: '"${GITHUB_ACTION_PATH}/scripts/publish.sh"'

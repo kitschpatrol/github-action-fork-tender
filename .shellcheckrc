@@ -1,0 +1,7 @@
+# Follow source'd files (scripts/lib.sh) from entry-point scripts
+external-sources=true
+source-path=SCRIPTDIR
+
+# SC2016: flags every single-quoted string containing backticks or $ — these
+# scripts intentionally emit literal markdown backticks and jq '$var' syntax
+disable=SC2016

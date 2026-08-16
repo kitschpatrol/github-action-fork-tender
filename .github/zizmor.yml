@@ -1,0 +1,7 @@
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        # First-party actions are trusted with floating major-version tags
+        'kitschpatrol/*': ref-pin
+        '*': hash-pin

@@ -1,3 +1,15 @@
 import { cspellConfig } from '@kitschpatrol/cspell-config'
 
-export default cspellConfig()
+export default cspellConfig({
+	words: [
+		'argjson',
+		'cursorrules',
+		'defanged',
+		'diffstat',
+		'gpgsign',
+		'rerere',
+		'shfmt',
+		'symref',
+		'vllm',
+	],
+})
