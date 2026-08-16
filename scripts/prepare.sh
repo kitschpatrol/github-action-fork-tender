@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Phase 3: mechanical merge/rebase attempts for every upstream needing a sync.
+# Phase 3: mechanical merge attempts for every upstream needing a sync.
 # Whatever git + rerere can do deterministically happens here; only genuinely
 # novel conflicts (and impact evaluation) are left for the Claude phase, whose
 # prompt this script assembles.
@@ -59,10 +59,10 @@ branch_preflight() {
 	echo 'proceed'
 }
 
-# --- mechanical attempts ----------------------------------------------------
+# --- mechanical attempt -----------------------------------------------------
 
-# Each attempt_* function echoes a status and leaves the sync branch in the
-# state the status describes. Conflict lists land in $CONFLICTS.
+# Echoes a status and leaves the sync branch in the state the status
+# describes. Conflict lists land in $CONFLICTS.
 CONFLICTS=''
 
 conflicted_files() { git diff --name-only --diff-filter=U | head -50; }
@@ -91,75 +91,19 @@ attempt_merge() {
 	fi
 }
 
-attempt_rebase_pure() {
-	local entry=$1 sync_branch remote_sha merge_base base
-	sync_branch=$(jq -r '.sync_branch' <<< "$entry")
-	remote_sha=$(jq -r '.remote_sha' <<< "$entry")
-	merge_base=$(jq -r '.merge_base' <<< "$entry")
-	base=$(base_sha)
-
-	git checkout -q -B "$sync_branch" "$base"
-	if git rebase --onto "$remote_sha" "$merge_base" "$sync_branch" > /dev/null 2>&1; then
-		echo 'rebased-clean'
-	else
-		CONFLICTS=$(conflicted_files)
-		git rebase --abort
-		echo 'rebase-conflicts'
-	fi
-}
-
-attempt_rebase_frozen() {
-	local entry=$1 sync_branch repo remote_sha frozen_tag base
-	sync_branch=$(jq -r '.sync_branch' <<< "$entry")
-	repo=$(jq -r '.repo' <<< "$entry")
-	remote_sha=$(jq -r '.remote_sha' <<< "$entry")
-	frozen_tag=$(jq -r '.frozen_tag' <<< "$entry")
-	base=$(base_sha)
-
-	git checkout -q -B "$sync_branch" "refs/tags/${frozen_tag}"
-	git merge --no-ff --no-commit "$remote_sha" > /dev/null 2>&1 || true
-	restore_protected_paths "$base"
-	CONFLICTS=$(conflicted_files)
-	if [[ -n "$CONFLICTS" ]]; then
-		git merge --abort
-		echo 'boundary-conflicts'
-		return 0
-	fi
-	git commit -q --no-verify \
-		-m "Merge upstream ${repo} at tag boundary (${frozen_tag})" -m "$FT_TRAILER"
-
-	# Replay the fork's post-tag commits on top, on a scratch branch so the
-	# base branch is never moved.
-	git branch -f ft-replay "$base"
-	if git rebase --onto "$sync_branch" "refs/tags/${frozen_tag}" ft-replay > /dev/null 2>&1; then
-		git branch -f "$sync_branch" ft-replay
-		git checkout -q "$sync_branch"
-		git branch -q -D ft-replay
-		echo 'rebased-clean'
-	else
-		CONFLICTS=$(conflicted_files)
-		git rebase --abort
-		git checkout -q "$sync_branch"
-		git branch -q -D ft-replay
-		echo 'replay-conflicts'
-	fi
-}
-
 # --- prompt assembly --------------------------------------------------------
 
 recipe_for() {
 	local status=$1 entry=$2
-	local sync_branch remote_sha merge_base frozen_tag repo
+	local sync_branch remote_sha merge_base
 	sync_branch=$(jq -r '.sync_branch' <<< "$entry")
 	remote_sha=$(jq -r '.remote_sha' <<< "$entry")
 	merge_base=$(jq -r '.merge_base' <<< "$entry")
-	frozen_tag=$(jq -r '.frozen_tag' <<< "$entry")
-	repo=$(jq -r '.repo' <<< "$entry")
 
 	case "$status" in
-		merged-clean | rebased-clean)
+		merged-clean)
 			cat <<- EOF
-				The mechanical sync already succeeded and is committed on \`${sync_branch}\`.
+				The mechanical merge already succeeded and is committed on \`${sync_branch}\`.
 				Your job is evaluation: inspect what came in (\`git log\`, \`git show\`), apply any
 				ignore rules listed below (revert or edit out those changes, then commit), run the
 				verify command if one is given, fix regressions, and report.
@@ -174,39 +118,6 @@ recipe_for() {
 				   \`git diff ${merge_base} ${remote_sha} -- <file>\` to see what upstream changed and why.
 				4. \`git add\` resolved files, then \`git commit\` (keep the default merge message,
 				   append a "${FT_TRAILER}" trailer line).
-			EOF
-			;;
-		rebase-conflicts)
-			cat <<- EOF
-				A rebase was attempted and hit conflicts, then aborted. Redo it yourself:
-				1. \`git checkout ${sync_branch}\` (at the fork's tip)
-				2. \`git rebase --onto ${remote_sha} ${merge_base} ${sync_branch}\`
-				3. Resolve each stop: understand both sides
-				   (\`git diff ${merge_base} ${remote_sha} -- <file>\`), \`git add\`, \`git rebase --continue\`.
-			EOF
-			;;
-		boundary-conflicts)
-			cat <<- EOF
-				Frozen-tag rebase: history up to tag \`${frozen_tag}\` must be preserved verbatim.
-				The boundary merge hit conflicts and was aborted. Redo the whole flow:
-				1. \`git checkout ${sync_branch}\` (at tag \`${frozen_tag}\`)
-				2. \`git merge --no-ff ${remote_sha}\` — resolve conflicts, commit with a
-				   "${FT_TRAILER}" trailer line.
-				3. \`git rebase --onto ${sync_branch} ${frozen_tag} ${FT_BASE_BRANCH}~0\` — replays the
-				   fork's post-tag commits detached; resolve any stops with \`git rebase --continue\`.
-				4. \`git checkout -B ${sync_branch}\` to point the branch at the rebased tip.
-				Never move the \`${FT_BASE_BRANCH}\` branch itself.
-			EOF
-			;;
-		replay-conflicts)
-			cat <<- EOF
-				Frozen-tag rebase: the boundary merge of ${repo} is already committed on
-				\`${sync_branch}\`. Replaying the fork's post-tag commits hit conflicts and was
-				aborted. Finish it:
-				1. \`git rebase --onto ${sync_branch} ${frozen_tag} ${FT_BASE_BRANCH}~0\` (runs detached)
-				2. Resolve each stop, \`git add\`, \`git rebase --continue\`.
-				3. \`git checkout -B ${sync_branch}\` to point the branch at the rebased tip.
-				Never move the \`${FT_BASE_BRANCH}\` branch itself.
 			EOF
 			;;
 	esac
@@ -301,8 +212,7 @@ main() {
 	git config rerere.enabled true
 	git config rerere.autoUpdate true
 
-	local strategy baseline_status='skipped'
-	strategy=$(jq -r '.strategy' "$FT_STATE_FILE")
+	local baseline_status='skipped'
 	if [[ -n "$VERIFY_CMD" ]]; then
 		baseline_status=$(run_verify baseline)
 	fi
@@ -325,26 +235,21 @@ main() {
 				if [[ "$behind_now" -eq 0 ]]; then
 					status='empty'
 				else
-					case "${strategy}:$(jq -r '.rebase_mode' <<< "$entry")" in
-						merge:*) status=$(attempt_merge "$entry") ;;
-						rebase:pure) status=$(attempt_rebase_pure "$entry") ;;
-						rebase:frozen) status=$(attempt_rebase_frozen "$entry") ;;
-						*) die "unexpected strategy/mode for ${repo}" ;;
-					esac
+					status=$(attempt_merge "$entry")
 					git checkout -q "$FT_BASE_BRANCH"
 				fi
 			fi
 
 			# Post-sync verify only for clean mechanical results; conflicted
 			# branches get verified by Claude after resolution.
-			if [[ ("$status" == 'merged-clean' || "$status" == 'rebased-clean') && -n "$VERIFY_CMD" && "$baseline_status" == 'pass' ]]; then
+			if [[ "$status" == 'merged-clean' && -n "$VERIFY_CMD" && "$baseline_status" == 'pass' ]]; then
 				git checkout -q "$(jq -r '.sync_branch' <<< "$entry")"
 				verify_branch=$(run_verify "$(sanitize_ref "$repo")")
 				git checkout -q "$FT_BASE_BRANCH"
 			fi
 
 			case "$status" in
-				merged-clean | rebased-clean | conflicts | rebase-conflicts | boundary-conflicts | replay-conflicts)
+				merged-clean | conflicts)
 					index=$((index + 1))
 					claude_needed='true'
 					build_task_section "$index" "$entry" "$status" "$verify_branch" >> "$tasks_file"
@@ -364,9 +269,7 @@ main() {
 	mv "$tmp" "$FT_STATE_FILE"
 
 	if [[ "$claude_needed" == 'true' ]]; then
-		local template="${PROMPTS_DIR}/merge.md"
-		[[ "$strategy" == 'rebase' ]] && template="${PROMPTS_DIR}/rebase.md"
-		assemble_prompt "$template" "$tasks_file" "$baseline_status"
+		assemble_prompt "${PROMPTS_DIR}/merge.md" "$tasks_file" "$baseline_status"
 		set_output_from_file prompt "$FT_PROMPT_FILE"
 		log "prompt assembled: ${FT_PROMPT_FILE}"
 	fi

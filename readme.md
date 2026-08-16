@@ -21,11 +21,11 @@ Fork Tender runs on a schedule inside your fork, detects new commits on the upst
 
 ## How it works
 
-Each run walks a strategy ladder per upstream:
+Each run walks a ladder per upstream:
 
 1. **Nothing new** → exit.
 2. **Pure fast-forward** — your fork has no unique commits: the "Sync fork" API fast-forwards your default branch directly. No LLM involved, upstream SHAs preserved. (Set `ff: issue` to get a notification issue instead.)
-3. **Diverged** → a sync branch (`fork-tender/<owner>-<repo>`) is built mechanically: `git merge` (or rebase, per your strategy) with a shared [`rerere`](https://git-scm.com/docs/git-rerere) cache so previously-seen conflicts resolve for free, and agent-config files always restored to your version. Claude then evaluates the changes, resolves any remaining conflicts (fork intent wins), applies your ignore rules, runs your verify command, and reports. A deterministic publish step pushes the branch and opens or refreshes the PR — the agent itself can never push or call the GitHub API.
+3. **Diverged** → a sync branch (`fork-tender/<owner>-<repo>`) is built mechanically: `git merge` with a shared [`rerere`](https://git-scm.com/docs/git-rerere) cache so previously-seen conflicts resolve for free, and agent-config files always restored to your version. Claude then evaluates the changes, resolves any remaining conflicts (fork intent wins), applies your ignore rules, runs your verify command, and reports. A deterministic publish step pushes the branch and opens or refreshes the PR — the agent itself can never push or call the GitHub API.
 
 Outcomes map to PR states: clean/resolved syncs are normal PRs, uncertain ones are drafts, unresolvable ones are drafts labeled `fork-tender:broken` with conflict markers committed for you to finish, and "don't take this" recommendations become issues instead of PRs.
 
@@ -89,7 +89,7 @@ jobs:
 
 ## Configuration
 
-Optional. Without a config file, the action auto-detects the fork's GitHub parent and uses merge strategy. Add `.github/fork-tender.yml` to customize:
+Optional. Without a config file, the action auto-detects the fork's GitHub parent and uses defaults. Add `.github/fork-tender.yml` to customize:
 
 ```yaml
 # Upstreams to track. Omit entirely to auto-detect the GitHub parent.
@@ -98,10 +98,6 @@ upstreams:
     parent: true
   - repo: desirecore/electron-vite # any other repo that shares history
     branch: main # optional, defaults to their default branch
-
-# merge (default): merge commits favoring your changes; PRs merge normally.
-# rebase: your commits sit on top as a clean stack; PRs are landed manually.
-strategy: merge
 
 # auto (default): fast-forward directly when your fork has no unique commits.
 # issue: open a notification issue instead and leave the syncing to you.
@@ -129,20 +125,11 @@ guidance: |
   Our public API in src/index.ts must remain backward compatible.
 ```
 
-## Strategies
+## Sync semantics
 
-**`merge`** (default) — upstream is merged into a sync branch with a merge commit. History is never rewritten, so release tags are automatically safe, and the PR merges with the normal GitHub button. Right choice for multi-upstream repos (required — `rebase` supports exactly one upstream).
+Diverged upstreams are always integrated with a **merge commit**. History is never rewritten, so your release tags — and everything you've published from them — are automatically safe, and every PR merges with the normal GitHub button. The cost is that your local patches stay interleaved in history rather than sitting on top as a clean stack; if you ever want to restack a fork, do that as a deliberate one-off (it requires force-pushing your default branch, which this action never does).
 
-**`rebase`** — your fork's commits are replayed on top of upstream as a clean patch stack. If your newest tag contains fork-specific commits (you ship releases of the fork), history up to and including that tag is preserved verbatim: upstream is merged once at the tag boundary and only your post-tag commits are rebased on top. Because the result rewrites history relative to your default branch, GitHub's merge button can't land it — the PR is review-only, and its body contains the exact commands to land it manually:
-
-```sh
-git fetch origin
-git checkout main
-git reset --hard origin/fork-tender/<owner>-<repo>
-git push --force-with-lease origin main
-```
-
-**Fast-forward** happens before either strategy whenever your fork has no unique commits (parent upstream only). It uses GitHub's own merge-upstream API — the same thing as the "Sync fork" button — so upstream SHAs are preserved exactly.
+**Fast-forward** happens instead whenever your fork has no unique commits (parent upstream only). It uses GitHub's own merge-upstream API — the same thing as the "Sync fork" button — so upstream SHAs are preserved exactly.
 
 ## Tokens and CI on sync PRs
 

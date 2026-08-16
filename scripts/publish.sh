@@ -36,11 +36,6 @@ result_for() {
 finalize_branch() {
 	local git_dir
 	git_dir=$(git rev-parse --git-dir)
-	if [[ -d "${git_dir}/rebase-merge" || -d "${git_dir}/rebase-apply" ]]; then
-		git rebase --abort || true
-		echo 'broken'
-		return 0
-	fi
 	if git ls-files -u | grep -q . || [[ -f "${git_dir}/MERGE_HEAD" ]]; then
 		git add -A
 		git commit -q --no-verify \
@@ -59,7 +54,7 @@ sanitize_markdown() { sed -e 's/<!--//g' -e 's/-->//g' | head -c 60000; }
 
 build_pr_body() {
 	local entry=$1 result=$2 head_sha=$3 verify_display=$4
-	local repo remote_sha merge_base behind upstream_branch outcome confidence strategy
+	local repo remote_sha merge_base behind upstream_branch outcome confidence
 	repo=$(jq -r '.repo' <<< "$entry")
 	remote_sha=$(jq -r '.remote_sha' <<< "$entry")
 	merge_base=$(jq -r '.merge_base' <<< "$entry")
@@ -67,22 +62,12 @@ build_pr_body() {
 	upstream_branch=$(jq -r '.branch' <<< "$entry")
 	outcome=$(jq -r '.outcome' <<< "$result")
 	confidence=$(jq -r '.confidence // "low"' <<< "$result")
-	strategy=$(jq -r '.strategy' "$FT_STATE_FILE")
 
 	jq -r '.body // ""' <<< "$result" | sanitize_markdown
 	printf '\n\n---\n\n'
 	printf '**%s new commit(s)** from [`%s`](https://github.com/%s/tree/%s) · [upstream compare](https://github.com/%s/compare/%s...%s)\n\n' \
 		"$behind" "$repo" "$repo" "$upstream_branch" "$repo" "${merge_base:0:12}" "${remote_sha:0:12}"
 	printf '%s\n\n' "$verify_display"
-	if [[ "$strategy" == 'rebase' ]]; then
-		local sync_branch base
-		sync_branch=$(jq -r '.sync_branch' <<< "$entry")
-		base=$(base_branch)
-		printf '### Landing this PR\n\n'
-		printf 'This branch rewrites history relative to `%s`, so the GitHub merge button cannot land it. After review, land it manually:\n\n' "$base"
-		printf '```sh\ngit fetch origin\ngit checkout %s\ngit reset --hard origin/%s\ngit push --force-with-lease origin %s\n```\n\nThen close this PR.\n\n' \
-			"$base" "$sync_branch" "$base"
-	fi
 	printf '<sub>Automated by fork-tender · outcome: `%s` · confidence: `%s`</sub>\n\n' "$outcome" "$confidence"
 	printf '<!-- fork-tender-upstream: %s -->\n<!-- fork-tender-head: %s -->\n' "$remote_sha" "$head_sha"
 }

@@ -122,7 +122,7 @@ runs:
           --model ${{ inputs.model }}
           --max-turns ${{ inputs.max-turns }}
           --add-dir ${{ runner.temp }}/fork-tender
-          --allowedTools "Read,Edit,Write,Grep,Glob,Bash(git status:*),Bash(git stash:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git add:*),Bash(git rm:*),Bash(git checkout:*),Bash(git switch:*),Bash(git restore:*),Bash(git merge:*),Bash(git rebase:*),Bash(git cherry-pick:*),Bash(git revert:*),Bash(git commit:*),Bash(git branch:*),Bash(git rev-parse:*),Bash(git rev-list:*),Bash(git merge-base:*),Bash(git ls-files:*),Bash(git describe:*),Bash(git rerere:*),Bash(git grep:*)${{ inputs.extra-allowed-tools != '' && format(',{0}', inputs.extra-allowed-tools) || '' }}"
+          --allowedTools "Read,Edit,Write,Grep,Glob,Bash(git status:*),Bash(git stash:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git add:*),Bash(git rm:*),Bash(git checkout:*),Bash(git switch:*),Bash(git restore:*),Bash(git merge:*),Bash(git cherry-pick:*),Bash(git revert:*),Bash(git commit:*),Bash(git branch:*),Bash(git rev-parse:*),Bash(git rev-list:*),Bash(git merge-base:*),Bash(git ls-files:*),Bash(git describe:*),Bash(git rerere:*),Bash(git grep:*)${{ inputs.extra-allowed-tools != '' && format(',{0}', inputs.extra-allowed-tools) || '' }}"
 
     - name: Publish PRs
       id: publish

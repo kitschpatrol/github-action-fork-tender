@@ -71,7 +71,6 @@ commit_in() {
 # $FORK (working clone). Writes a config declaring the upstream.
 scenario() {
 	CURRENT_SCENARIO=$1
-	local extra_config=${2:-}
 	echo "── ${CURRENT_SCENARIO}"
 	local dir="${TMP}/${CURRENT_SCENARIO// /-}"
 	UPSTREAM="${dir}/upstream" FORK="${dir}/fork" ORIGIN="${dir}/fork-origin.git"
@@ -91,10 +90,8 @@ scenario() {
 	git -C "$FORK" push -q origin main
 
 	mkdir -p "${FORK}/.github"
-	{
-		printf 'upstreams:\n  - repo: test/upstream\n    url: %s\n    branch: main\n    parent: true\n' "$UPSTREAM"
-		[[ -n "$extra_config" ]] && printf '%s\n' "$extra_config"
-	} > "${FORK}/.github/fork-tender.yml"
+	printf 'upstreams:\n  - repo: test/upstream\n    url: %s\n    branch: main\n    parent: true\n' \
+		"$UPSTREAM" > "${FORK}/.github/fork-tender.yml"
 	git -C "$FORK" add -A
 	git -C "$FORK" commit -q -m 'fork: add fork-tender config'
 	git -C "$FORK" push -q origin main
@@ -210,53 +207,27 @@ test_protected_paths() {
 	git_q -C "$FORK" checkout main
 }
 
-test_rebase_pure() {
-	scenario 'rebase-pure' 'strategy: rebase'
-	commit_in "$FORK" 'src/fork-feature.js' 'export const fork = true' 'fork: add feature'
-	git -C "$FORK" push -q origin main
+# Released (tagged) fork history must never be rewritten — merge-based
+# syncs guarantee this by construction, and this test pins the invariant.
+test_merge_preserves_tags() {
+	scenario 'merge-preserves-tags'
+	commit_in "$FORK" 'src/fork-feature.js' 'export const fork = true' 'fork: released feature'
+	git -C "$FORK" tag v1.0.0
+	local tag_sha
+	tag_sha=$(git -C "$FORK" rev-parse v1.0.0)
+	git -C "$FORK" push -q origin main --tags
 	commit_in "$UPSTREAM" 'src/app.js' 'const a = 5' 'u3: change a'
 
 	run_step detect.sh
-	assert_eq 'pure' "$(state '.upstreams[0].rebase_mode')" 'no fork tags means pure rebase'
 	run_step prepare.sh
-	assert_eq 'rebased-clean' "$(state '.upstreams[0].prepare.status')" 'pure rebase succeeds'
-	local branch='fork-tender/test-upstream' upstream_sha
-	upstream_sha=$(git -C "$UPSTREAM" rev-parse main)
-	# Linear stack: upstream tip is an ancestor, no merge commits.
-	if git -C "$FORK" merge-base --is-ancestor "$upstream_sha" "$branch"; then
-		pass 'upstream tip is ancestor of rebased branch'
-	else
-		fail 'upstream tip not in rebased branch'
-	fi
-	assert_eq '' "$(git -C "$FORK" rev-list --merges "${upstream_sha}..${branch}")" 'rebased stack has no merge commits'
-	assert_eq '2' "$(git -C "$FORK" rev-list --count "${upstream_sha}..${branch}")" 'both fork commits replayed on top'
-}
-
-test_rebase_frozen() {
-	scenario 'rebase-frozen' 'strategy: rebase'
-	commit_in "$FORK" 'src/fork-feature.js' 'export const fork = true' 'fork: released feature'
-	git -C "$FORK" tag v1.0.0
-	commit_in "$FORK" 'src/fork-wip.js' 'export const wip = true' 'fork: post-release work'
-	git -C "$FORK" push -q origin main --tags
-	commit_in "$UPSTREAM" 'src/app.js' 'const a = 6' 'u3: change a'
-
-	run_step detect.sh
-	assert_eq 'frozen' "$(state '.upstreams[0].rebase_mode')" 'tag with fork commits selects frozen mode'
-	assert_eq 'v1.0.0' "$(state '.upstreams[0].frozen_tag')" 'frozen tag identified'
-	run_step prepare.sh
-	assert_eq 'rebased-clean' "$(state '.upstreams[0].prepare.status')" 'frozen rebase succeeds'
+	assert_eq 'merged-clean' "$(state '.upstreams[0].prepare.status')" 'tagged fork merges cleanly'
 	local branch='fork-tender/test-upstream'
+	assert_eq "$tag_sha" "$(git -C "$FORK" rev-parse v1.0.0)" 'tag still points at the released commit'
 	if git -C "$FORK" merge-base --is-ancestor v1.0.0 "$branch"; then
-		pass 'tagged history preserved verbatim in branch'
+		pass 'tagged history is intact ancestry of the sync branch'
 	else
-		fail 'tag not ancestor of branch'
+		fail 'tag not ancestor of sync branch'
 	fi
-	assert_eq "$(git -C "$FORK" rev-parse v1.0.0)" "$(git -C "$FORK" rev-parse "${branch}~2")" 'boundary merge sits directly on the tag'
-	assert_contains "$(git -C "$FORK" log --format=%s -1 "$branch")" 'post-release work' 'post-tag commit replayed on top'
-	git_q -C "$FORK" checkout "$branch"
-	assert_file_eq "${FORK}/src/app.js" 'const a = 6' 'upstream change present'
-	assert_file_eq "${FORK}/src/fork-feature.js" 'export const fork = true' 'released fork feature intact'
-	git_q -C "$FORK" checkout main
 }
 
 test_publish_and_rerun() {
@@ -323,8 +294,7 @@ test_ignore_blocks_ff
 test_clean_merge
 test_conflict_merge
 test_protected_paths
-test_rebase_pure
-test_rebase_frozen
+test_merge_preserves_tags
 test_publish_and_rerun
 test_broken_finalize
 

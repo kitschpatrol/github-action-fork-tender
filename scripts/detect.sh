@@ -15,11 +15,8 @@ normalize_config() {
 		log "no config at ${config_path}, using defaults"
 	fi
 
-	local strategy ff_mode
-	strategy=$(config_get '.strategy // "merge"')
+	local ff_mode
 	ff_mode=$(config_get '.ff // "auto"')
-	[[ "$strategy" == 'merge' || "$strategy" == 'rebase' ]] \
-		|| die "config: strategy must be 'merge' or 'rebase', got '${strategy}'"
 	[[ "$ff_mode" == 'auto' || "$ff_mode" == 'issue' ]] \
 		|| die "config: ff must be 'auto' or 'issue', got '${ff_mode}'"
 }
@@ -63,9 +60,8 @@ main() {
 	base_sha=$(git rev-parse HEAD)
 	git rev-parse --verify --quiet 'HEAD~0' > /dev/null || die 'repository has no commits'
 
-	local parent strategy ff_mode
+	local parent ff_mode
 	parent=$(detect_parent)
-	strategy=$(config_get '.strategy // "merge"')
 	ff_mode=$(config_get '.ff // "auto"')
 
 	# Upstream list: config wins; otherwise fall back to the GitHub parent.
@@ -74,10 +70,6 @@ main() {
 	if [[ $(jq -r 'length' <<< "$upstream_specs") -eq 0 ]]; then
 		[[ -n "$parent" ]] || die 'no upstreams configured and this repository is not a GitHub fork (no parent)'
 		upstream_specs=$(jq -cn --arg repo "$parent" '[{repo: $repo, url: "", branch: "", parent: true}]')
-	fi
-
-	if [[ "$strategy" == 'rebase' && $(jq -r 'length' <<< "$upstream_specs") -gt 1 ]]; then
-		die "strategy 'rebase' supports exactly one upstream; use 'merge' for multi-upstream repos"
 	fi
 
 	local entries='[]' spec
@@ -132,19 +124,6 @@ main() {
 			if [[ "$ff_mode" == 'auto' ]]; then action='ff'; else action='ff-issue'; fi
 		fi
 
-		# Rebase-mode tag analysis: the newest tag reachable from the base
-		# branch freezes history up to itself.
-		local frozen_tag='' rebase_mode=''
-		if [[ "$strategy" == 'rebase' && "$action" == 'sync' ]]; then
-			frozen_tag=$(git describe --tags --abbrev=0 "$base_sha" 2> /dev/null || true)
-			if [[ -z "$frozen_tag" ]] || is_ancestor "refs/tags/${frozen_tag}" "$merge_base"; then
-				rebase_mode='pure' # tag (if any) lives in shared history — untouched by a rebase
-				frozen_tag=''
-			else
-				rebase_mode='frozen' # tag contains fork-specific commits — preserve up to it
-			fi
-		fi
-
 		local sync_branch remote_branch_sha='' pr_state
 		sync_branch="${FT_BRANCH_PREFIX}$(sanitize_ref "$repo")"
 		remote_branch_sha=$(git ls-remote origin "refs/heads/${sync_branch}" 2> /dev/null | cut -f1 || true)
@@ -157,23 +136,21 @@ main() {
 			--argjson behind "$behind" --argjson ahead "$ahead" \
 			--argjson is_parent "$is_parent" --argjson ignore_active "$ignore_active" \
 			--arg action "$action" --arg sync_branch "$sync_branch" \
-			--arg frozen_tag "$frozen_tag" --arg rebase_mode "$rebase_mode" \
 			--arg remote_branch_sha "$remote_branch_sha" --argjson pr "$pr_state" \
 			'{repo: $repo, url: $url, branch: $branch, remote_sha: $remote_sha,
 			  merge_base: $merge_base, behind: $behind, ahead: $ahead,
 			  is_parent: $is_parent, ignore_active: $ignore_active, action: $action,
-			  sync_branch: $sync_branch, frozen_tag: $frozen_tag,
-			  rebase_mode: $rebase_mode, remote_branch_sha: $remote_branch_sha,
+			  sync_branch: $sync_branch, remote_branch_sha: $remote_branch_sha,
 			  pr: $pr}')
 		entries=$(jq -c --argjson e "$entry" '. + [$e]' <<< "$entries")
-		log "${repo}: behind=${behind} ahead=${ahead} action=${action}${rebase_mode:+ rebase_mode=${rebase_mode}}"
+		log "${repo}: behind=${behind} ahead=${ahead} action=${action}"
 	done < <(jq -c '.[]' <<< "$upstream_specs")
 
 	jq -n \
 		--arg base_branch "$base_branch" --arg base_sha "$base_sha" \
-		--arg strategy "$strategy" --arg ff_mode "$ff_mode" \
+		--arg ff_mode "$ff_mode" \
 		--argjson upstreams "$entries" \
-		'{base_branch: $base_branch, base_sha: $base_sha, strategy: $strategy,
+		'{base_branch: $base_branch, base_sha: $base_sha,
 		  ff_mode: $ff_mode, upstreams: $upstreams}' > "$FT_STATE_FILE"
 
 	local ff_count sync_count
