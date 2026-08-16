@@ -10,10 +10,15 @@ branding:
 
 inputs:
   anthropic-api-key:
-    description: Anthropic API key (either this or claude-code-oauth-token is required)
+    description: >-
+      Anthropic API key. Optional when an ANTHROPIC_API_KEY or
+      CLAUDE_CODE_OAUTH_TOKEN env var is set on the action's step; an OAuth
+      token is preferred over an API key when both are present.
     required: false
   claude-code-oauth-token:
-    description: Claude subscription OAuth token from `claude setup-token` (either this or anthropic-api-key is required)
+    description: >-
+      Claude subscription OAuth token from `claude setup-token`. Optional when
+      a CLAUDE_CODE_OAUTH_TOKEN env var is set on the action's step.
     required: false
   github-token:
     description: >-
@@ -31,13 +36,6 @@ inputs:
     description: Path to the fork-tender config file in this repository
     required: false
     default: .github/fork-tender.yml
-  extra-allowed-tools:
-    description: >-
-      Comma-separated additional Claude tool permissions, e.g.
-      "Bash(pnpm:*),Bash(npm:*)" — grant whatever your configured verify
-      command needs to run.
-    required: false
-    default: ''
   max-turns:
     description: Maximum agent turns for the Claude phase
     required: false
@@ -62,16 +60,27 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Validate inputs
+    - name: Resolve auth
+      id: auth
       shell: bash
       env:
-        HAS_AUTH: ${{ (inputs.anthropic-api-key != '' || inputs.claude-code-oauth-token != '') && 'true' || 'false' }}
+        INPUT_API_KEY: ${{ inputs.anthropic-api-key }}
+        INPUT_OAUTH: ${{ inputs.claude-code-oauth-token }}
         DRY_RUN: ${{ inputs.dry-run }}
       run: |
-        if [[ "$HAS_AUTH" != 'true' && "$DRY_RUN" != 'true' ]]; then
-          echo '::error::fork-tender needs anthropic-api-key or claude-code-oauth-token'
+        # Inputs take precedence over env vars; everything is taken at face
+        # value, and the OAuth token wins when both kinds are present.
+        oauth="${INPUT_OAUTH:-${CLAUDE_CODE_OAUTH_TOKEN:-}}"
+        api_key="${INPUT_API_KEY:-${ANTHROPIC_API_KEY:-}}"
+        if [[ -z "${oauth}${api_key}" && "$DRY_RUN" != 'true' ]]; then
+          echo '::error::fork-tender needs Anthropic auth: set a CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) or ANTHROPIC_API_KEY env var on this step, or pass the corresponding input'
           exit 1
         fi
+        if [[ -n "$oauth" ]]; then api_key=''; fi
+        {
+          printf 'oauth-token=%s\n' "$oauth"
+          printf 'api-key=%s\n' "$api_key"
+        } >> "$GITHUB_OUTPUT"
 
     - name: Detect upstream changes
       id: detect
@@ -113,8 +122,8 @@ runs:
       if: steps.prepare.outputs.claude_needed == 'true' && inputs.dry-run != 'true'
       uses: anthropics/claude-code-action@9d7150bc8a3dae8149739a88019d192b579ad90c # v1.0.193
       with:
-        anthropic_api_key: ${{ inputs.anthropic-api-key }}
-        claude_code_oauth_token: ${{ inputs.claude-code-oauth-token }}
+        anthropic_api_key: ${{ steps.auth.outputs.api-key }}
+        claude_code_oauth_token: ${{ steps.auth.outputs.oauth-token }}
         github_token: ${{ inputs.github-token }}
         allowed_bots: ${{ inputs.allowed-bots }}
         prompt: ${{ steps.prepare.outputs.prompt }}
@@ -122,7 +131,7 @@ runs:
           --model ${{ inputs.model }}
           --max-turns ${{ inputs.max-turns }}
           --add-dir ${{ runner.temp }}/fork-tender
-          --allowedTools "Read,Edit,Write,Grep,Glob,Bash(git status:*),Bash(git stash:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git add:*),Bash(git rm:*),Bash(git checkout:*),Bash(git switch:*),Bash(git restore:*),Bash(git merge:*),Bash(git cherry-pick:*),Bash(git revert:*),Bash(git commit:*),Bash(git branch:*),Bash(git rev-parse:*),Bash(git rev-list:*),Bash(git merge-base:*),Bash(git ls-files:*),Bash(git describe:*),Bash(git rerere:*),Bash(git grep:*)${{ inputs.extra-allowed-tools != '' && format(',{0}', inputs.extra-allowed-tools) || '' }}"
+          --allowedTools "Read,Edit,Write,Grep,Glob,Bash(git status:*),Bash(git stash:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git add:*),Bash(git rm:*),Bash(git checkout:*),Bash(git switch:*),Bash(git restore:*),Bash(git merge:*),Bash(git cherry-pick:*),Bash(git revert:*),Bash(git commit:*),Bash(git branch:*),Bash(git rev-parse:*),Bash(git rev-list:*),Bash(git merge-base:*),Bash(git ls-files:*),Bash(git describe:*),Bash(git rerere:*),Bash(git grep:*)${{ steps.prepare.outputs.extra_allowed_tools != '' && format(',{0}', steps.prepare.outputs.extra_allowed_tools) || '' }}"
 
     - name: Publish PRs
       id: publish

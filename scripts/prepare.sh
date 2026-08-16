@@ -274,6 +274,9 @@ main() {
 		log "prompt assembled: ${FT_PROMPT_FILE}"
 	fi
 	set_output claude_needed "$claude_needed"
+	# Extra agent tool permissions from config (e.g. what verify needs);
+	# fork-owned content, same trust level as the workflow itself.
+	set_output extra_allowed_tools "$(config_get '.extra_allowed_tools // ""' | tr -d '\r\n')"
 }
 
 main "$@"

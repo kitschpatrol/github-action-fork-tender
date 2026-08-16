@@ -17,6 +17,10 @@
 
 <!-- /description -->
 
+> [!WARNING]
+>
+> **This project is under development. It should not be considered suitable for general use until a 2.0 release.**
+
 Fork Tender runs on a schedule inside your forked GitHub repositories to detect new upstream commits, and integrates them while always preserving your fork's intent.
 
 Boring cases are handled deterministically. Trickier cases go to an agent to fix any merge conflicts while preserving fork's functional changes. Intractable cases get a draft PR with committed conflict markers.
@@ -67,26 +71,46 @@ jobs:
           persist-credentials: false
 
       - uses: kitschpatrol/github-action-fork-tender@v1
-        with:
-          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-          # …or bill your Claude subscription instead:
-          # claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          extra-allowed-tools: 'Bash(pnpm:*)' # whatever your verify command needs
+        env:
+          # Bill your Claude subscription (token from `claude setup-token`):
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # …or bill per-token with an API key instead:
+          # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
+
+Auth can also be passed as the explicit `anthropic-api-key` / `claude-code-oauth-token` inputs. Everything is taken at face value — no token-type detection — and the OAuth token wins if both kinds are set.
+
+### Getting a token and setting the secret
+
+To bill your Claude subscription (Pro/Max/Team/Enterprise), generate a long-lived OAuth token with the [Claude Code CLI](https://code.claude.com/docs/en/setup) — it opens a browser to authorize, then prints an `sk-ant-oat…` token:
+
+```sh
+claude setup-token
+```
+
+To bill per-token instead, create an API key (`sk-ant-api…`) in the [Anthropic Console](https://console.anthropic.com/settings/keys).
+
+Then store the token as a repository secret under the matching name with the [GitHub CLI](https://cli.github.com) — you'll be prompted to paste it, which keeps it out of shell history:
+
+```sh
+gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo <owner>/<fork>
+# or: gh secret set ANTHROPIC_API_KEY --repo <owner>/<fork>
+```
+
+Repeat per fork, or for organization-owned repos set it once for all of them with `gh secret set CLAUDE_CODE_OAUTH_TOKEN --org <org> --visibility all` (personal accounts don't have org secrets — set it on each repo).
 
 ### Inputs
 
-| Input                     | Default                   | Description                                                                                                                                           |
-| ------------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `anthropic-api-key`       | —                         | Anthropic API key. One of this or `claude-code-oauth-token` is required.                                                                              |
-| `claude-code-oauth-token` | —                         | Claude subscription OAuth token from `claude setup-token`.                                                                                            |
-| `github-token`            | —                         | Token for pushes/PRs/issues. See [tokens](#tokens-and-ci-on-sync-prs).                                                                                |
-| `model`                   | `claude-opus-5`           | Claude model for evaluation and conflict resolution.                                                                                                  |
-| `config-path`             | `.github/fork-tender.yml` | Location of the [config file](#configuration).                                                                                                        |
-| `extra-allowed-tools`     | —                         | Extra Claude tool permissions, comma-separated (e.g. `Bash(pnpm:*),Bash(npm:*)`). Grant what your `verify` command needs; nothing else is accessible. |
-| `max-turns`               | `100`                     | Agent turn budget for the Claude phase.                                                                                                               |
-| `allowed-bots`            | —                         | Pass through to claude-code-action when a bot account last edited the workflow's cron (GitHub attributes scheduled runs to that account).             |
-| `dry-run`                 | `false`                   | Detect and attempt merges locally, but never push, open PRs, or invoke Claude.                                                                        |
+| Input                     | Default                   | Description                                                                                                                                                                                    |
+| ------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `anthropic-api-key`       | —                         | Anthropic API key. Optional when an `ANTHROPIC_API_KEY` env var is set on the action's step, as in the example above.                                                                          |
+| `claude-code-oauth-token` | —                         | Claude subscription OAuth token from `claude setup-token`. Optional when a `CLAUDE_CODE_OAUTH_TOKEN` env var is set instead. The OAuth token is preferred when both kinds of auth are present. |
+| `github-token`            | —                         | Token for pushes/PRs/issues. See [tokens](#tokens-and-ci-on-sync-prs).                                                                                                                         |
+| `model`                   | `claude-opus-5`           | Claude model for evaluation and conflict resolution.                                                                                                                                           |
+| `config-path`             | `.github/fork-tender.yml` | Location of the [config file](#configuration).                                                                                                                                                 |
+| `max-turns`               | `100`                     | Agent turn budget for the Claude phase.                                                                                                                                                        |
+| `allowed-bots`            | —                         | Pass through to claude-code-action when a bot account last edited the workflow's cron (GitHub attributes scheduled runs to that account).                                                      |
+| `dry-run`                 | `false`                   | Detect and attempt merges locally, but never push, open PRs, or invoke Claude.                                                                                                                 |
 
 ### Outputs
 
@@ -119,6 +143,10 @@ ff: auto
 # whether a failure is pre-existing or something the sync broke. Killed
 # after 30 minutes (override with an FT_VERIFY_TIMEOUT env var, seconds).
 verify: pnpm install && pnpm build && pnpm test
+
+# Extra Claude tool permissions, comma-separated — grant what your verify
+# command needs to run; nothing else is accessible to the agent.
+extra_allowed_tools: Bash(pnpm:*)
 
 # Paths always kept at your fork's version, extending the built-in list
 # (CLAUDE.md, CLAUDE.local.md, .claude/, .claude.json, .mcp.json, .cursor/,
