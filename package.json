@@ -1,0 +1,45 @@
+{
+	"name": "github-action-fork-tender",
+	"version": "1.0.0",
+	"private": true,
+	"description": "GitHub Action to keep your forks aligned with upstream.",
+	"keywords": [
+		"github-action",
+		"action",
+		"git",
+		"fork",
+		"upstream"
+	],
+	"homepage": "https://github.com/kitschpatrol/github-action-fork-tender",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/kitschpatrol/github-action-fork-tender.git"
+	},
+	"license": "MIT",
+	"author": {
+		"name": "Eric Mika",
+		"email": "eric@ericmika.com",
+		"url": "https://ericmika.com"
+	},
+	"type": "module",
+	"scripts": {
+		"build": "echo 'No build necessary'",
+		"clean": "shx rm -f pnpm-lock.yaml && git clean -fdX -e !.claude/",
+		"fix": "ksc fix --skip eslint knip stylelint typescript",
+		"lint": "ksc lint --skip eslint knip stylelint typescript",
+		"release": "bumpp --commit 'Release: %s' && ./scripts/sync-major-tag.sh",
+		"test": "echo 'No tests specified'"
+	},
+	"devDependencies": {
+		"@kitschpatrol/shared-config": "^8.6.0",
+		"bumpp": "^12.2.1",
+		"shx": "^0.4.0"
+	},
+	"packageManager": "pnpm@11.21.0",
+	"devEngines": {
+		"runtime": {
+			"name": "node",
+			"version": ">=24.16.0"
+		}
+	}
+}
