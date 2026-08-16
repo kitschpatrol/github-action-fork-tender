@@ -17,21 +17,29 @@
 
 <!-- /description -->
 
-Fork Tender runs on a schedule inside your fork, detects new commits on the upstream repository (or several), and integrates them **while always preserving your fork's local changes**. Boring cases are handled deterministically; everything else goes through Claude, which evaluates the upstream changes, resolves conflicts in your fork's favor, and writes up a reviewable pull request. When no sensible resolution exists, you get a draft PR with committed conflict markers instead of silence.
+Fork Tender runs on a schedule inside your forked GitHub repositories to detect new upstream commits, and integrates them while always preserving your fork's intent.
+
+Boring cases are handled deterministically. Trickier cases go to an agent to fix any merge conflicts while preserving fork's functional changes. Intractable cases get a draft PR with committed conflict markers.
 
 ## How it works
 
-Each run walks a ladder per upstream:
+Each run walks a ladder for each upstream repository:
 
 1. **Nothing new** → exit.
 2. **Pure fast-forward** — your fork has no unique commits: the "Sync fork" API fast-forwards your default branch directly. No LLM involved, upstream SHAs preserved. (Set `ff: issue` to get a notification issue instead.)
-3. **Diverged** → a sync branch (`fork-tender/<owner>-<repo>`) is built mechanically: `git merge` with a shared [`rerere`](https://git-scm.com/docs/git-rerere) cache so previously-seen conflicts resolve for free, and agent-config files always restored to your version. Claude then evaluates the changes, resolves any remaining conflicts (fork intent wins), applies your ignore rules, runs your verify command, and reports. A deterministic publish step pushes the branch and opens or refreshes the PR — the agent itself can never push or call the GitHub API.
+3. **Diverged** → a sync branch (`fork-tender/<owner>-<repo>`) is built mechanically: `git merge` with a shared [`rerere`](https://git-scm.com/docs/git-rerere) cache so previously-seen conflicts resolve for free, and agent-config files always restored to your version. The LLM then evaluates the changes, resolves any remaining conflicts (fork intent wins), applies your ignore rules, runs your verify command, and reports. A deterministic publish step pushes the branch and opens or refreshes the PR — the agent itself can never push or call the GitHub API.
 
 Outcomes map to PR states: clean/resolved syncs are normal PRs, uncertain ones are drafts, unresolvable ones are drafts labeled `fork-tender:broken` with conflict markers committed for you to finish, and "don't take this" recommendations become issues instead of PRs.
 
 ## Usage
 
+Two files are involved, both in your fork:
+
+1. **A workflow** (required) at `.github/workflows/fork-tender.yml` — runs the action on a schedule. Shown below.
+2. **A config file** (optional) at `.github/fork-tender.yml` — per-repo behavior like extra upstreams and ignore rules. See [Configuration](#configuration).
+
 ```yaml
+# .github/workflows/fork-tender.yml
 name: Fork Tender
 
 on:
@@ -89,9 +97,11 @@ jobs:
 
 ## Configuration
 
-Optional. Without a config file, the action auto-detects the fork's GitHub parent and uses defaults. Add `.github/fork-tender.yml` to customize:
+Configuration lives in its own file at `.github/fork-tender.yml` — **not** inside the workflow above, and not under `workflows/` (same split as Dependabot's `.github/dependabot.yml`; relocate it with the `config-path` input). It's entirely optional: with no config file, the action auto-detects the fork's GitHub parent and uses defaults. Every key below is optional too.
 
 ```yaml
+# .github/fork-tender.yml
+
 # Upstreams to track. Omit entirely to auto-detect the GitHub parent.
 upstreams:
   - repo: alex8088/electron-vite # GitHub parent — eligible for fast-forward
