@@ -9,6 +9,8 @@ export default cspellConfig({
 		'gpgsign',
 		'rerere',
 		'shfmt',
+		'SIGPIPE',
+		'subshell',
 		'symref',
 		'vllm',
 	],

@@ -65,7 +65,9 @@ branch_preflight() {
 # describes. Conflict lists land in $CONFLICTS.
 CONFLICTS=''
 
-conflicted_files() { git diff --name-only --diff-filter=U | head -50; }
+# `|| true`: head may close the pipe early, and the resulting SIGPIPE would
+# otherwise fail the pipeline under pipefail.
+conflicted_files() { { git diff --name-only --diff-filter=U || true; } | head -50; }
 
 attempt_merge() {
 	local entry=$1 sync_branch repo remote_sha base

@@ -23,7 +23,7 @@
 
 Fork Tender runs on a schedule inside your forked GitHub repositories to detect new upstream commits, and integrates them while always preserving your fork's intent.
 
-Boring cases are handled deterministically. Trickier cases go to an agent to fix any merge conflicts while preserving fork's functional changes. Intractable cases get a draft PR with committed conflict markers.
+Boring cases are handled deterministically. Trickier cases go to an agent to fix any merge conflicts while preserving your fork's functional changes. Intractable cases get a draft PR with conflicts.
 
 ## How it works
 
@@ -80,6 +80,8 @@ jobs:
 
 Auth can also be passed as the explicit `anthropic-api-key` / `claude-code-oauth-token` inputs. Everything is taken at face value — no token-type detection — and the OAuth token wins if both kinds are set.
 
+GitHub disables actions by default on forks, so make sure actions are enabled.
+
 ### Getting a token and setting the secret
 
 To bill your Claude subscription (Pro/Max/Team/Enterprise), generate a long-lived OAuth token with the [Claude Code CLI](https://code.claude.com/docs/en/setup) — it opens a browser to authorize, then prints an `sk-ant-oat…` token:
@@ -98,6 +100,12 @@ gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo <owner>/<fork>
 ```
 
 Repeat per fork, or for organization-owned repos set it once for all of them with `gh secret set CLAUDE_CODE_OAUTH_TOKEN --org <org> --visibility all` (personal accounts don't have org secrets — set it on each repo).
+
+Or in the author's case, from the checked-out repo:
+
+```sh
+op read 'op://Personal/Claude Code OAuth Token/credential' | gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo <owner>/<fork>
+```
 
 ### Inputs
 

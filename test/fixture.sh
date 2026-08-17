@@ -264,6 +264,30 @@ test_publish_and_rerun() {
 	git_q -C "$FORK" checkout main
 }
 
+# A failed push must fail the run with an 'error' outcome — never report
+# success (regression: a dead token once yielded a green run with no PR).
+test_publish_push_failure() {
+	scenario 'publish-push-failure'
+	commit_in "$FORK" 'src/fork-feature.js' 'export const fork = true' 'fork: add feature'
+	git -C "$FORK" push -q origin main
+	commit_in "$UPSTREAM" 'src/app.js' 'const a = 9' 'u3: change a'
+
+	run_step detect.sh
+	run_step prepare.sh
+	jq -n '{results: [{repo: "test/upstream", outcome: "clean", confidence: "high",
+		title: "Sync upstream test/upstream", body: "All good.", notes: []}]}' \
+		> "${FT_STATE_DIR}/results.json"
+	git -C "$FORK" remote set-url origin "${TMP}/nonexistent-origin.git"
+	if (cd "$FORK" && bash "${SCRIPTS_DIR}/publish.sh") > "${FT_STATE_DIR}/publish.sh.out" 2>&1; then
+		fail 'publish.sh exited zero despite a failing push'
+	else
+		pass 'publish.sh exits non-zero when the push fails'
+	fi
+	assert_contains "$(cat "${FT_STATE_DIR}/publish.sh.out")" '"test/upstream":"error"' 'outcome map records the error'
+	assert_contains "$(cat "${FT_STATE_DIR}/summary.md")" '| `test/upstream` | sync | error |' 'summary records the error outcome'
+	assert_eq 'main' "$(git -C "$FORK" branch --show-current)" 'failed publish returns the checkout to the base branch'
+}
+
 test_broken_finalize() {
 	scenario 'broken-finalize'
 	commit_in "$FORK" 'src/app.js' 'const a = "fork"' 'fork: customize a'
@@ -296,6 +320,7 @@ test_conflict_merge
 test_protected_paths
 test_merge_preserves_tags
 test_publish_and_rerun
+test_publish_push_failure
 test_broken_finalize
 
 echo

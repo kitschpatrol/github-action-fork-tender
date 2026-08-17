@@ -133,12 +133,53 @@ runs:
           --add-dir ${{ runner.temp }}/fork-tender
           --allowedTools "Read,Edit,Write,Grep,Glob,Bash(git status:*),Bash(git stash:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git add:*),Bash(git rm:*),Bash(git checkout:*),Bash(git switch:*),Bash(git restore:*),Bash(git merge:*),Bash(git cherry-pick:*),Bash(git revert:*),Bash(git commit:*),Bash(git branch:*),Bash(git rev-parse:*),Bash(git rev-list:*),Bash(git merge-base:*),Bash(git ls-files:*),Bash(git describe:*),Bash(git rerere:*),Bash(git grep:*)${{ steps.prepare.outputs.extra_allowed_tools != '' && format(',{0}', steps.prepare.outputs.extra_allowed_tools) || '' }}"
 
+    - name: Mint publish token
+      id: publish-token
+      if: steps.detect.outputs.needs_sync == 'true' && inputs.github-token == '' && inputs.dry-run != 'true'
+      shell: bash
+      run: |
+        # claude-code-action revokes the app token it minted at the end of its
+        # own composite run, so its github_token output is already dead here.
+        # Mint a fresh Claude App token for the publish phase: unlike
+        # GITHUB_TOKEN, pushes made with it trigger CI on the sync PRs. Every
+        # failure mode falls back to the workflow token with a warning.
+        fall_back() {
+          echo "::warning::[fork-tender] ${1}; publishing with the workflow token, so CI will not run on the sync PRs"
+          exit 0
+        }
+        if [[ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]]; then
+          fall_back 'workflow lacks `id-token: write`, cannot mint a Claude App token'
+        fi
+        oidc=$(curl -sSf --max-time 30 \
+          -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+          "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=claude-code-github-action" \
+          | jq -r '.value // empty') || oidc=''
+        [[ -n "$oidc" ]] || fall_back 'could not obtain an OIDC token'
+        token=$(curl -sSf --max-time 30 -X POST \
+          -H "Authorization: Bearer ${oidc}" \
+          'https://api.anthropic.com/api/github/github-app-token-exchange' \
+          | jq -r '.token // .app_token // empty') || token=''
+        [[ -n "$token" ]] || fall_back 'Claude App token exchange failed (is the Claude GitHub App installed on this repository?)'
+        echo "::add-mask::${token}"
+        printf 'token=%s\n' "$token" >> "$GITHUB_OUTPUT"
+
     - name: Publish PRs
       id: publish
       if: steps.detect.outputs.has_work == 'true'
       shell: bash
       env:
         FT_DRY_RUN: ${{ inputs.dry-run }}
-        FT_PUSH_TOKEN: ${{ inputs.github-token || steps.claude.outputs.github_token || github.token }}
-        GH_TOKEN: ${{ inputs.github-token || steps.claude.outputs.github_token || github.token }}
+        FT_PUSH_TOKEN: ${{ inputs.github-token || steps.publish-token.outputs.token || github.token }}
+        GH_TOKEN: ${{ inputs.github-token || steps.publish-token.outputs.token || github.token }}
       run: '"${GITHUB_ACTION_PATH}/scripts/publish.sh"'
+
+    - name: Revoke publish token
+      if: always() && steps.publish-token.outputs.token != ''
+      shell: bash
+      env:
+        FT_PUBLISH_TOKEN: ${{ steps.publish-token.outputs.token }}
+      run: |
+        curl -sS --max-time 10 -X DELETE \
+          -H 'Accept: application/vnd.github+json' \
+          -H "Authorization: Bearer ${FT_PUBLISH_TOKEN}" \
+          "${GITHUB_API_URL:-https://api.github.com}/installation/token" || true

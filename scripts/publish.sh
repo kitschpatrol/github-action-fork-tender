@@ -36,18 +36,29 @@ result_for() {
 finalize_branch() {
 	local git_dir
 	git_dir=$(git rev-parse --git-dir)
-	if git ls-files -u | grep -q . || [[ -f "${git_dir}/MERGE_HEAD" ]]; then
-		git add -A
+	if [[ -n "$(git ls-files -u)" || -f "${git_dir}/MERGE_HEAD" ]]; then
+		git add -A || return 1
 		git commit -q --no-verify \
-			-m 'Unresolved upstream sync (conflict markers committed)' -m "$FT_TRAILER"
+			-m 'Unresolved upstream sync (conflict markers committed)' -m "$FT_TRAILER" || return 1
 		echo 'broken'
 		return 0
 	fi
 	if ! git diff --quiet || ! git diff --cached --quiet; then
-		git add -A
-		git commit -q --no-verify -m 'Uncommitted sync work' -m "$FT_TRAILER"
+		git add -A || return 1
+		git commit -q --no-verify -m 'Uncommitted sync work' -m "$FT_TRAILER" || return 1
 	fi
 	echo ''
+}
+
+# Abort publication of the current repo: report, return to the base branch,
+# and exit non-zero. Only valid inside publish_branch, which always runs in a
+# command substitution subshell — `exit` ends that subshell, not the run, so
+# main can record an 'error' outcome and keep going with other upstreams.
+publish_fail() {
+	local repo=$1 msg=$2
+	printf '::error::[fork-tender] %s: %s\n' "$repo" "$msg" >&2
+	git checkout -q "$(base_branch)" 2> /dev/null || true
+	exit 1
 }
 
 sanitize_markdown() { sed -e 's/<!--//g' -e 's/-->//g' | head -c 60000; }
@@ -120,12 +131,17 @@ publish_branch() {
 	pr_number=$(jq -r '.pr.number // ""' <<< "$entry")
 	pr_state=$(jq -r '.pr.state // ""' <<< "$entry")
 
-	git checkout -q "$sync_branch"
+	# Already-on-branch check: `git checkout` refuses to run on a conflicted
+	# index, which is exactly the state an abandoned agent merge leaves behind.
+	if [[ "$(git rev-parse --abbrev-ref HEAD)" != "$sync_branch" ]]; then
+		git checkout -q "$sync_branch" || publish_fail "$repo" "could not check out ${sync_branch}"
+	fi
 	local forced_broken result outcome
-	forced_broken=$(finalize_branch)
+	forced_broken=$(finalize_branch) || publish_fail "$repo" "could not finalize ${sync_branch}"
 	restore_protected_paths "$(base_sha)"
 	if ! git diff --cached --quiet; then
-		git commit -q --no-verify -m 'Restore protected paths' -m "$FT_TRAILER"
+		git commit -q --no-verify -m 'Restore protected paths' -m "$FT_TRAILER" \
+			|| publish_fail "$repo" 'could not commit protected-path restoration'
 	fi
 
 	result=$(result_for "$repo" "$behind")
@@ -167,9 +183,11 @@ publish_branch() {
 	fi
 
 	if [[ -n "$remote_branch_sha" ]]; then
-		git push --force-with-lease="refs/heads/${sync_branch}:${remote_branch_sha}" origin "$sync_branch"
+		git push --force-with-lease="refs/heads/${sync_branch}:${remote_branch_sha}" origin "$sync_branch" \
+			|| publish_fail "$repo" "could not push ${sync_branch} to origin (lease on ${remote_branch_sha})"
 	else
-		git push origin "$sync_branch"
+		git push origin "$sync_branch" \
+			|| publish_fail "$repo" "could not push ${sync_branch} to origin"
 	fi
 
 	if skip_gh; then
@@ -181,16 +199,21 @@ publish_branch() {
 	[[ "$outcome" == 'partial' || "$outcome" == 'broken' ]] && draft_args=(--draft)
 	local pr_url=''
 	if [[ "$pr_state" == 'OPEN' && -n "$pr_number" ]]; then
-		gh pr edit "$pr_number" --title "$title" --body-file "$body_file" > /dev/null
+		gh pr edit "$pr_number" --title "$title" --body-file "$body_file" > /dev/null \
+			|| publish_fail "$repo" "could not update PR #${pr_number}"
 		if [[ "$outcome" == 'partial' || "$outcome" == 'broken' ]]; then
 			gh pr ready "$pr_number" --undo > /dev/null 2>&1 || true
 		fi
-		pr_url=$(gh pr view "$pr_number" --json url --jq '.url')
+		pr_url=$(gh pr view "$pr_number" --json url --jq '.url') \
+			|| publish_fail "$repo" "could not read the URL of PR #${pr_number}"
 		log "${repo}: updated PR ${pr_url}"
 	else
 		pr_url=$(gh pr create --head "$sync_branch" --base "$(base_branch)" \
-			--title "$title" --body-file "$body_file" "${draft_args[@]}")
-		pr_number=$(gh pr view "$pr_url" --json number --jq '.number')
+			--title "$title" --body-file "$body_file" "${draft_args[@]}") \
+			|| publish_fail "$repo" 'could not create the sync PR'
+		[[ -n "$pr_url" ]] || publish_fail "$repo" 'gh pr create reported success but returned no URL'
+		pr_number=$(gh pr view "$pr_url" --json number --jq '.number') \
+			|| publish_fail "$repo" "could not resolve the PR number of ${pr_url}"
 		log "${repo}: opened PR ${pr_url}"
 	fi
 	gh pr edit "$pr_number" --add-label "$FT_LABEL" > /dev/null 2>&1 || true
@@ -220,7 +243,7 @@ main() {
 	dry_run || ensure_labels
 	: > "${FT_STATE_DIR}/pr-urls.txt"
 
-	local summary_file="${FT_STATE_DIR}/summary.md" outcomes='{}'
+	local summary_file="${FT_STATE_DIR}/summary.md" outcomes='{}' errors=0
 	printf '### Fork Tender\n\n| Upstream | Action | Outcome |\n|---|---|---|\n' > "$summary_file"
 
 	local entry
@@ -243,12 +266,20 @@ main() {
 						if [[ -n "$pr_number" ]] && ! dry_run; then
 							comment_once "$pr_number" \
 								"<!-- fork-tender-skip: $(jq -r '.remote_branch_sha' <<< "$entry") -->" \
-								'Fork Tender: this branch has commits it did not push, so this run left the PR untouched. Close the PR or merge your changes to let future runs refresh it.'
+								'Fork Tender: this branch has commits it did not push, so this run left the PR untouched. Close the PR or merge your changes to let future runs refresh it.' \
+								|| warn "could not comment on PR #${pr_number} for ${repo}"
 						fi
 						;;
 					declined) outcome='declined-previously' ;;
 					empty) outcome='empty' ;;
-					*) outcome=$(publish_branch "$entry" "$status") ;;
+					*)
+						# The `if !` both suppresses set -e (so one failing upstream
+						# doesn't abort the others) and records the failure.
+						if ! outcome=$(publish_branch "$entry" "$status"); then
+							outcome='error'
+							errors=$((errors + 1))
+						fi
+						;;
 				esac
 				;;
 		esac
@@ -262,6 +293,7 @@ main() {
 	set_output outcome "$outcomes"
 	set_output_from_file pr-urls "${FT_STATE_DIR}/pr-urls.txt"
 	log "publish complete: ${outcomes}"
+	[[ "$errors" -eq 0 ]] || die "failed to publish ${errors} upstream(s); see errors above"
 }
 
 main "$@"

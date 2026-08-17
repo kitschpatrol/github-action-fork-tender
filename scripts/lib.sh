@@ -4,6 +4,12 @@
 
 set -euo pipefail
 
+# Bash drops errexit inside $() command substitutions unless this is set
+# (bash >= 4.4; GitHub runners qualify). macOS's system bash 3.2 lacks it, so
+# critical write paths in publish.sh guard their commands explicitly rather
+# than relying on it.
+shopt -s inherit_errexit 2> /dev/null || true
+
 FT_STATE_DIR="${FT_STATE_DIR:-${RUNNER_TEMP:-/tmp}/fork-tender}"
 FT_STATE_FILE="$FT_STATE_DIR/state.json"
 FT_CONFIG_FILE="$FT_STATE_DIR/config.json"
@@ -126,7 +132,9 @@ restore_protected_paths() {
 # or fence-delimiter lookalikes stripped.
 defanged_log() {
 	local range=$1 limit=${2:-200}
-	git log --no-decorate --format='%h %s (%an)' "$range" \
+	# `|| true`: head may close the pipe early, and the resulting SIGPIPE would
+	# otherwise fail the pipeline under pipefail.
+	{ git log --no-decorate --format='%h %s (%an)' "$range" || true; } \
 		| head -n "$limit" \
 		| sed -e 's/@/@\xE2\x80\x8B/g' -e 's/<!--//g' -e 's/-->//g' -e 's/```/` ` `/g'
 }
