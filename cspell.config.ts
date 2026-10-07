@@ -2,16 +2,20 @@ import { cspellConfig } from '@kitschpatrol/cspell-config'
 
 export default cspellConfig({
 	words: [
+		'aormsby',
 		'argjson',
-		'cursorrules',
-		'defanged',
 		'diffstat',
+		'exions',
+		'ghuntley',
 		'gpgsign',
+		'kailashchanel',
 		'rerere',
+		'rizzler',
 		'shfmt',
-		'SIGPIPE',
-		'subshell',
 		'symref',
+		'syncwright',
+		'tgymnich',
+		'Veyron',
 		'vllm',
 	],
 })

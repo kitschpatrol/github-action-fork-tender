@@ -120,7 +120,7 @@ runs:
     - name: Resolve and evaluate with Claude
       id: claude
       if: steps.prepare.outputs.claude_needed == 'true' && inputs.dry-run != 'true'
-      uses: anthropics/claude-code-action@9d7150bc8a3dae8149739a88019d192b579ad90c # v1.0.193
+      uses: anthropics/claude-code-action@86d88e619d8e6caf07b5c3944dd14f441c533718 # v1.0.243
       with:
         anthropic_api_key: ${{ steps.auth.outputs.api-key }}
         claude_code_oauth_token: ${{ steps.auth.outputs.oauth-token }}

@@ -219,6 +219,22 @@ Linting: `pnpm lint` for the repo tooling, plus `shellcheck scripts/*.sh test/*.
 - [How we automated GitHub Actions runner updates with Claude | Depot](https://depot.dev/blog/how-we-automated-github-actions-runner-updates-with-claude) — the draft-PR-for-review pattern.
 - [anthropics/claude-code-action](https://github.com/anthropics/claude-code-action) — powers the agent phase.
 
+## Related projects
+
+| Action / tool                                                                                       | Stars | Detects upstream  | Conflict handling                      | AI  | Opens PR             | Last push  |
+| --------------------------------------------------------------------------------------------------- | ----: | ----------------- | -------------------------------------- | --- | -------------------- | ---------- |
+| [aormsby/Fork-Sync-With-Upstream-action](https://github.com/aormsby/Fork-Sync-With-Upstream-action) |   325 | yes, hash compare | none                                   | no  | no, direct push      | 2026-04-23 |
+| [tgymnich/fork-sync](https://github.com/tgymnich/fork-sync)                                         |   470 | yes, via API      | none (API merge fails)                 | no  | yes, and auto-merges | 2024-09-01 |
+| [wei/pull](https://github.com/wei/pull) (GitHub App, not an Action)                                 |  7200 | yes               | labels PR, assigns `conflictReviewers` | no  | yes                  | active     |
+| [exions/merge-upstream](https://github.com/exions/merge-upstream)                                   |    24 | yes               | none                                   | no  | no                   | 2023-11-20 |
+| [kuma0128/sync-upstream-action](https://github.com/kuma0128/sync-upstream-action)                   |     0 | yes               | fails, optional issue                  | no  | yes                  | 2026-01-27 |
+| [FasterApiWeb/fork-shepherd](https://github.com/FasterApiWeb/fork-shepherd)                         |     0 | yes               | opens `sync-conflict` issue            | no  | yes (backports)      | 2026-07-10 |
+| [NeuBlink/syncwright](https://github.com/NeuBlink/syncwright)                                       |     2 | **no**            | Claude resolves, confidence ≥0.7       | yes | no                   | 2025-07-28 |
+| [ghuntley/rizzler](https://github.com/ghuntley/rizzler)                                             |    68 | no                | multi-provider LLM                     | yes | no                   | 2026-04-23 |
+| [kailashchanel/reconcile-ai](https://github.com/kailashchanel/reconcile-ai)                         |     9 | no                | OpenAI, has `branch_preference`        | yes | no                   | 2025-06-22 |
+| [9999years/claude-mergetool](https://github.com/9999years/claude-mergetool)                         |     5 | no                | Claude Code as git mergetool           | yes | no                   | active     |
+| [VeyronSakai/conflict-resolver](https://github.com/VeyronSakai/conflict-resolver)                   |     1 | no                | YAML rules, ours/theirs by glob        | no  | no                   | 2026-08-11 |
+
 <!-- license -->
 
 ## License
