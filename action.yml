@@ -43,7 +43,7 @@ inputs:
   max-turns:
     description: Maximum agent turns for the Claude phase
     required: false
-    default: '100'
+    default: '200'
   allowed-bots:
     description: Passed through to claude-code-action; needed when a bot account last edited the workflow cron
     required: false
