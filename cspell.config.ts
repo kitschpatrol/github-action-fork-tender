@@ -17,5 +17,6 @@ export default cspellConfig({
 		'tgymnich',
 		'Veyron',
 		'vllm',
+		'xhigh',
 	],
 })

@@ -31,7 +31,11 @@ inputs:
   model:
     description: Claude model to use
     required: false
-    default: claude-opus-5
+    default: claude-opus-5-5
+  effort:
+    description: 'Claude effort level: low, medium, high, or xhigh'
+    required: false
+    default: high
   config-path:
     description: Path to the fork-tender config file in this repository
     required: false
@@ -129,6 +133,7 @@ runs:
         prompt: ${{ steps.prepare.outputs.prompt }}
         claude_args: >-
           --model ${{ inputs.model }}
+          --effort ${{ inputs.effort }}
           --max-turns ${{ inputs.max-turns }}
           --add-dir ${{ runner.temp }}/fork-tender
           --allowedTools "Read,Edit,Write,Grep,Glob,Bash(git status:*),Bash(git stash:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git add:*),Bash(git rm:*),Bash(git checkout:*),Bash(git switch:*),Bash(git restore:*),Bash(git merge:*),Bash(git cherry-pick:*),Bash(git revert:*),Bash(git commit:*),Bash(git branch:*),Bash(git rev-parse:*),Bash(git rev-list:*),Bash(git merge-base:*),Bash(git ls-files:*),Bash(git describe:*),Bash(git rerere:*),Bash(git grep:*)${{ steps.prepare.outputs.extra_allowed_tools != '' && format(',{0}', steps.prepare.outputs.extra_allowed_tools) || '' }}"
