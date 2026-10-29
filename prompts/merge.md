@@ -41,6 +41,23 @@ and never touch `{{BASE_BRANCH}}`.
 - Keep notes as you go if it helps; the final report is what matters.
 - Prefer the fork's side when a resolution is genuinely uncertain, and record
   the uncertainty in your report (`confidence`, `notes`).
+- Lockfiles (`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `Cargo.lock`,
+  `uv.lock`, …) are generated: never hand-merge their conflict hunks. Resolve
+  the manifest, then regenerate the lockfile with the project's package
+  manager. If your tools can't run it, keep whichever side is closer to the
+  resolved manifest, set the outcome to `partial`, and say in the body that the
+  lockfile is stale.
+- Pass `--no-verify` to `git commit` and `git merge`. A verify run can install
+  the fork's own git hooks (commit-message linters, lint-staged), and those are
+  not meant to gate sync commits.
+- Your shell runs only git subcommands plus the tools listed under "Tool
+  access" below. Any other command is denied by permission. A denial says
+  nothing about whether the tool is installed or the network is reachable, so
+  don't report it that way and don't hunt for workarounds. When the sync needs
+  a command you can't run, put the exact command in your report and add that
+  future runs can do it themselves if the maintainer installs the toolchain in
+  the fork-tender workflow and grants the command in the fork-tender config's
+  `extra_allowed_tools` key.
 
 ## Report (required)
 

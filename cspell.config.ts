@@ -9,6 +9,7 @@ export default cspellConfig({
 		'ghuntley',
 		'gpgsign',
 		'kailashchanel',
+		'lockfiles',
 		'rerere',
 		'rizzler',
 		'shfmt',

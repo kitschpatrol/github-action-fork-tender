@@ -155,7 +155,12 @@ ff: auto
 verify: pnpm install && pnpm build && pnpm test
 
 # Extra Claude tool permissions, comma-separated — grant what your verify
-# command needs to run; nothing else is accessible to the agent.
+# command needs to run; nothing else is accessible to the agent. With the
+# package manager granted, the agent also regenerates lockfiles after resolving
+# manifest conflicts. Grant only that with e.g.
+# Bash(pnpm install --lockfile-only --no-frozen-lockfile --ignore-pnpmfile:*).
+# Both this and verify need the toolchain on the runner: install it in workflow
+# steps before fork-tender (e.g. pnpm/action-setup, actions/setup-node).
 extra_allowed_tools: Bash(pnpm:*)
 
 # Paths always kept at your fork's version, extending the built-in list

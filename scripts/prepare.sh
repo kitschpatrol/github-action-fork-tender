@@ -115,10 +115,10 @@ recipe_for() {
 			cat <<- EOF
 				A merge was attempted and hit conflicts, then aborted. Redo it yourself:
 				1. \`git checkout ${sync_branch}\` (already at the fork's tip)
-				2. \`git merge --no-ff ${remote_sha}\`
+				2. \`git merge --no-ff --no-verify ${remote_sha}\`
 				3. Resolve each conflicted file. Understand both sides first: use
 				   \`git diff ${merge_base} ${remote_sha} -- <file>\` to see what upstream changed and why.
-				4. \`git add\` resolved files, then \`git commit\` (keep the default merge message,
+				4. \`git add\` resolved files, then \`git commit --no-verify\` (keep the default merge message,
 				   append a "${FT_TRAILER}" trailer line).
 			EOF
 			;;
@@ -170,9 +170,15 @@ build_task_section() {
 }
 
 assemble_prompt() {
-	local template=$1 tasks_file=$2 baseline_status=$3
-	local guidance verify_section
+	local template=$1 tasks_file=$2 baseline_status=$3 extra_tools=$4
+	local guidance tools_section verify_section
 	guidance=$(config_get '.guidance // ""')
+
+	if [[ -n "$extra_tools" ]]; then
+		tools_section="Extra tools the fork maintainer granted: \`${extra_tools}\`"
+	else
+		tools_section='The fork maintainer granted no extra tools: you cannot install dependencies, build, or run tests.'
+	fi
 
 	if [[ -n "$VERIFY_CMD" ]]; then
 		verify_section="Verify command (run it from the repository root): \`${VERIFY_CMD}\`
@@ -192,6 +198,7 @@ parity with the baseline, not green."
 		-e "s|{{TRAILER}}|${FT_TRAILER}|g" \
 		"$template" > "$FT_PROMPT_FILE"
 	{
+		printf '\n## Tool access\n\n%s\n' "$tools_section"
 		printf '\n## Verification\n\n%s\n' "$verify_section"
 		if [[ -n "$guidance" ]]; then
 			printf '\n## Repository-specific guidance (from the fork maintainer)\n\n%s\n' "$guidance"
@@ -210,6 +217,10 @@ main() {
 	FT_BASE_BRANCH=$(base_branch)
 	FT_DELIM="untrusted-upstream-data-${RANDOM}${RANDOM}"
 	VERIFY_CMD=$(config_get '.verify // ""')
+	# Extra agent tool permissions from config (e.g. what verify needs);
+	# fork-owned content, same trust level as the workflow itself.
+	local extra_tools
+	extra_tools=$(config_get '.extra_allowed_tools // ""' | tr -d '\r\n')
 
 	git config rerere.enabled true
 	git config rerere.autoUpdate true
@@ -271,14 +282,12 @@ main() {
 	mv "$tmp" "$FT_STATE_FILE"
 
 	if [[ "$claude_needed" == 'true' ]]; then
-		assemble_prompt "${PROMPTS_DIR}/merge.md" "$tasks_file" "$baseline_status"
+		assemble_prompt "${PROMPTS_DIR}/merge.md" "$tasks_file" "$baseline_status" "$extra_tools"
 		set_output_from_file prompt "$FT_PROMPT_FILE"
 		log "prompt assembled: ${FT_PROMPT_FILE}"
 	fi
 	set_output claude_needed "$claude_needed"
-	# Extra agent tool permissions from config (e.g. what verify needs);
-	# fork-owned content, same trust level as the workflow itself.
-	set_output extra_allowed_tools "$(config_get '.extra_allowed_tools // ""' | tr -d '\r\n')"
+	set_output extra_allowed_tools "$extra_tools"
 }
 
 main "$@"

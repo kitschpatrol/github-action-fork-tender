@@ -172,11 +172,13 @@ test_clean_merge() {
 	assert_file_eq "${FORK}/src/app.js" 'const a = 3' 'upstream change present on sync branch'
 	assert_file_eq "${FORK}/src/fork-feature.js" 'export const fork = true' 'fork change preserved on sync branch'
 	assert_contains "$(cat "${FT_STATE_DIR}/prompt.md")" 'Task 1: test/upstream' 'prompt contains the task'
+	assert_contains "$(cat "${FT_STATE_DIR}/prompt.md")" 'granted no extra tools' 'prompt says no extra tools were granted'
 	git_q -C "$FORK" checkout main
 }
 
 test_conflict_merge() {
 	scenario 'conflict-merge'
+	printf 'extra_allowed_tools: Bash(make lock:*)\n' >> "${FORK}/.github/fork-tender.yml"
 	commit_in "$FORK" 'src/app.js' 'const a = "fork"' 'fork: customize a'
 	git -C "$FORK" push -q origin main
 	commit_in "$UPSTREAM" 'src/app.js' 'const a = 99' 'u3: conflicting change'
@@ -186,6 +188,7 @@ test_conflict_merge() {
 	assert_eq 'conflicts' "$(state '.upstreams[0].prepare.status')" 'overlapping edits are reported as conflicts'
 	assert_contains "$(cat "${FT_STATE_DIR}/prompt.md")" 'src/app.js' 'prompt lists the conflicted file'
 	assert_contains "$(cat "${FT_STATE_DIR}/prompt.md")" 'git merge --no-ff' 'prompt carries the redo recipe'
+	assert_contains "$(cat "${FT_STATE_DIR}/prompt.md")" 'granted: `Bash(make lock:*)`' 'prompt lists the granted extra tools'
 	# Branch was left at the fork tip with no merge in progress.
 	assert_eq "$(git -C "$FORK" rev-parse main)" "$(git -C "$FORK" rev-parse fork-tender/test-upstream)" 'conflicted branch left at fork tip'
 	assert_eq '' "$(git -C "$FORK" ls-files -u)" 'no unresolved index entries left behind'
